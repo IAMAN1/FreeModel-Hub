@@ -1,4 +1,10 @@
-create table if not exists public.profiles(id uuid primary key references auth.users(id) on delete cascade,guardian_consent boolean not null default false,created_at timestamptz not null default now());
+create table if not exists public.profiles(id uuid primary key references auth.users(id) on delete cascade,guardian_consent boolean not null default false,access_approved boolean not null default false,created_at timestamptz not null default now());
+create schema if not exists private;
+revoke all on schema private from public,anon,authenticated;
+create or replace function private.create_playground_profile() returns trigger language plpgsql security definer set search_path='' as $ begin insert into public.profiles(id,guardian_consent,access_approved) values(new.id,false,false) on conflict(id) do nothing; return new; end; $;
+revoke all on function private.create_playground_profile() from public,anon,authenticated;
+drop trigger if exists on_auth_user_created_playground on auth.users;
+create trigger on_auth_user_created_playground after insert on auth.users for each row execute function private.create_playground_profile();
 create table if not exists public.conversations(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id) on delete cascade,title text not null default 'แชตใหม่' check(char_length(title)<=120),provider text not null default 'deepseek',model text not null default 'deepseek-flash',created_at timestamptz not null default now(),updated_at timestamptz not null default now());
 create index if not exists conversations_user_updated_idx on public.conversations(user_id,updated_at desc);
 create table if not exists public.messages(id uuid primary key default gen_random_uuid(),conversation_id uuid not null references public.conversations(id) on delete cascade,user_id uuid not null references auth.users(id) on delete cascade,role text not null check(role in('user','assistant')),content text not null check(char_length(content)<=20000),prompt_tokens integer,completion_tokens integer,created_at timestamptz not null default now());

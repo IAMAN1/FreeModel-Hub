@@ -41,3 +41,9 @@ Provider links point to official docs/pricing pages for Google AI, Groq, OpenRou
 
 ## License
 MIT
+## AI Playground (beta source)
+
+- Open `playground.html` for the authenticated AI chat interface.
+- Backend setup, Supabase Auth, cloud history, quotas, and deployment: [`docs/DEPLOY-PLAYGROUND.md`](docs/DEPLOY-PLAYGROUND.md).
+- Provider policy screening: [`docs/SHARED-POOL-REVIEW.md`](docs/SHARED-POOL-REVIEW.md).
+- Shared Pool is intentionally disabled by default. The first adapter is metered DeepSeek API, not a free unlimited model. Do not enable it before provider/legal, guardian-consent, budget, and security checks.

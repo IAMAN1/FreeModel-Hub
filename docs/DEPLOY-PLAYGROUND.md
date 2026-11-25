@@ -8,7 +8,7 @@ The GitHub Pages frontend is static. Auth, cloud chat and inference require a Su
 4. Deploy `supabase/functions/chat/index.ts` as function `chat` with JWT verification enabled.
 5. Add Edge Function secrets `DEEPSEEK_API_KEY` and `SHARED_POOL_ENABLED=false`. Supabase's secret/service-role key is injected by the platform; do not commit it.
 6. Open `playground.html`, register, verify email if enabled, then sign in.
-7. After legal, billing, budget and security checks, enable the shared pool by changing the secret to `true`.
+7. Verify each user's age/guardian-consent evidence outside self-attestation. Only an authorized administrator may approve a profile. Example SQL for an individually reviewed account: `update public.profiles set guardian_consent=true, access_approved=true where id='<AUTH_USER_UUID>';` Never let users update these flags themselves.\n8. After legal, billing, budget and security checks, enable the shared pool by changing the secret to `true`.
 
 ## Controls
 - DeepSeek Flash only; provider allowlist enforced server-side.

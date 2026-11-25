@@ -23,4 +23,6 @@ create policy "message own delete" on public.messages for delete to authenticate
 revoke all on public.usage_events from anon,authenticated;
 create or replace function public.consume_chat_quota(p_user_id uuid,p_max_hourly integer default 15) returns boolean language plpgsql security definer set search_path='' as $$ declare n integer; begin perform pg_advisory_xact_lock(hashtextextended(p_user_id::text,0)); select count(*) into n from public.usage_events where user_id=p_user_id and created_at>now()-interval '1 hour'; if n>=greatest(1,least(p_max_hourly,60)) then return false; end if; insert into public.usage_events(user_id,provider,model) values(p_user_id,'deepseek','deepseek-flash'); return true; end; $$;
 revoke all on function public.consume_chat_quota(uuid,integer) from public,anon,authenticated;grant execute on function public.consume_chat_quota(uuid,integer) to service_role;
-revoke insert,update,delete on public.profiles from anon,authenticated;\ngrant select on public.profiles to authenticated;\ngrant select,insert,update,delete on public.conversations,public.messages to authenticated;
+revoke insert,update,delete on public.profiles from anon,authenticated;
+grant select on public.profiles to authenticated;
+grant select,insert,update,delete on public.conversations,public.messages to authenticated;

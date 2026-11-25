@@ -13,8 +13,6 @@ create table if not exists public.usage_events(id bigint generated always as ide
 create index if not exists usage_events_user_created_idx on public.usage_events(user_id,created_at desc);
 alter table public.profiles enable row level security;alter table public.conversations enable row level security;alter table public.messages enable row level security;alter table public.usage_events enable row level security;
 create policy "profile own read" on public.profiles for select to authenticated using((select auth.uid())=id);
-create policy "profile own insert" on public.profiles for insert to authenticated with check((select auth.uid())=id);
-create policy "profile own update" on public.profiles for update to authenticated using((select auth.uid())=id) with check((select auth.uid())=id);
 create policy "conversation own select" on public.conversations for select to authenticated using((select auth.uid())=user_id);
 create policy "conversation own insert" on public.conversations for insert to authenticated with check((select auth.uid())=user_id);
 create policy "conversation own update" on public.conversations for update to authenticated using((select auth.uid())=user_id) with check((select auth.uid())=user_id);
@@ -25,4 +23,4 @@ create policy "message own delete" on public.messages for delete to authenticate
 revoke all on public.usage_events from anon,authenticated;
 create or replace function public.consume_chat_quota(p_user_id uuid,p_max_hourly integer default 15) returns boolean language plpgsql security definer set search_path='' as $$ declare n integer; begin perform pg_advisory_xact_lock(hashtextextended(p_user_id::text,0)); select count(*) into n from public.usage_events where user_id=p_user_id and created_at>now()-interval '1 hour'; if n>=greatest(1,least(p_max_hourly,60)) then return false; end if; insert into public.usage_events(user_id,provider,model) values(p_user_id,'deepseek','deepseek-flash'); return true; end; $$;
 revoke all on function public.consume_chat_quota(uuid,integer) from public,anon,authenticated;grant execute on function public.consume_chat_quota(uuid,integer) to service_role;
-grant select,insert,update,delete on public.profiles,public.conversations,public.messages to authenticated;
+revoke insert,update,delete on public.profiles from anon,authenticated;\ngrant select on public.profiles to authenticated;\ngrant select,insert,update,delete on public.conversations,public.messages to authenticated;

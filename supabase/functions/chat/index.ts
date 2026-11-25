@@ -1,0 +1,57 @@
+import {createClient} from "https://esm.sh/@supabase/supabase-js@2.57.4";
+const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, apikey, content-type","Access-Control-Allow-Methods":"POST, OPTIONS","Content-Type":"application/json"};
+const json=(v:unknown,s=200)=>new Response(JSON.stringify(v),{status:s,headers:cors});
+const MODEL="orcarouter/free";
+Deno.serve(async req=>{
+ if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
+ if(req.method!=="POST")return json({error:"Method not allowed"},405);
+ if(Deno.env.get("SHARED_POOL_ENABLED")!=="true")return json({error:"Shared Pool ยังไม่เปิดให้บริการ ขณะรอตรวจสอบข้อกำหนดผู้ให้บริการและการอนุญาตสำหรับผู้ใช้กลุ่มนักเรียน"},503);
+ const url=Deno.env.get("SUPABASE_URL");
+ const publishable=JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS")??"{}").default;
+ const secret=JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS")??"{}").default;
+ const key=Deno.env.get("ORCAROUTER_API_KEY");
+ if(!url||!publishable||!secret||!key)return json({error:"Backend configuration incomplete"},503);
+ const auth=req.headers.get("Authorization")??"";
+ if(!auth.startsWith("Bearer "))return json({error:"กรุณาเข้าสู่ระบบ"},401);
+ const token=auth.slice(7);
+ const userClient=createClient(url,publishable,{global:{headers:{Authorization:auth}},auth:{persistSession:false}});
+ const {data:{user},error:authError}=await userClient.auth.getUser(token);
+ if(authError||!user)return json({error:"เซสชันไม่ถูกต้อง"},401);
+ let body:{message?:string;conversation_id?:string|null;model?:string};
+ try{body=await req.json()}catch{return json({error:"Invalid JSON"},400)}
+ const prompt=typeof body.message==="string"?body.message.trim():"";
+ if(!prompt||prompt.length>12000)return json({error:"ข้อความต้องมีความยาว 1–12,000 ตัวอักษร"},400);
+ if(body.model&&body.model!==MODEL)return json({error:"Model not allowlisted"},400);
+ const admin=createClient(url,secret,{auth:{persistSession:false}});
+ const {data:profile,error:profileError}=await admin.from("profiles").select("guardian_consent,access_approved").eq("id",user.id).maybeSingle();
+ if(profileError)return json({error:"ตรวจสอบสิทธิ์ไม่สำเร็จ"},500);
+ if(!profile?.guardian_consent||!profile?.access_approved)return json({error:"บัญชียังไม่ได้รับอนุมัติจากผู้ดูแลหลังตรวจสอบอายุ/ความยินยอม"},403);
+ const {data:quota,error:quotaError}=await admin.rpc("consume_chat_quota",{p_user_id:user.id,p_max_hourly:15});
+ if(quotaError)return json({error:"Quota check failed"},500);
+ if(!quota)return json({error:"เกินโควตา 15 คำขอต่อชั่วโมง"},429);
+ let cid=body.conversation_id??null;
+ if(cid){
+  const {data,error}=await admin.from("conversations").select("id,title").eq("id",cid).eq("user_id",user.id).maybeSingle();
+  if(error)return json({error:"ตรวจสอบห้องสนทนาไม่สำเร็จ"},500);
+  if(!data)return json({error:"ไม่พบห้องสนทนา"},404);
+ }else{
+  const {data,error}=await admin.from("conversations").insert({user_id:user.id,title:prompt.slice(0,72),provider:"orcarouter",model:MODEL}).select("id,title").single();
+  if(error||!data)return json({error:"สร้างห้องสนทนาไม่สำเร็จ"},500);
+  cid=data.id;
+ }
+ const {data:history,error:historyError}=await admin.from("messages").select("role,content").eq("conversation_id",cid).eq("user_id",user.id).order("created_at",{ascending:false}).limit(30);
+ if(historyError)return json({error:"โหลดประวัติไม่สำเร็จ"},500);
+ const {error:insertError}=await admin.from("messages").insert({conversation_id:cid,user_id:user.id,role:"user",content:prompt});
+ if(insertError)return json({error:"บันทึกข้อความไม่สำเร็จ"},500);
+ try{
+  const upstream=await fetch("https://api.orcarouter.ai/v1/chat/completions",{method:"POST",headers:{"Authorization":`Bearer ${key}`,"Content-Type":"application/json","X-OrcaRouter-Include-Cost":"true"},body:JSON.stringify({model:MODEL,messages:[...(history??[]).reverse(),{role:"user",content:prompt}],stream:false,max_tokens:2048}),signal:AbortSignal.timeout(60000)});
+  if(!upstream.ok)return json({error:upstream.status===429?"OrcaRouter rate limit — ลองใหม่ภายหลัง":"OrcaRouter provider error",provider_status:upstream.status},502);
+  const out=await upstream.json(),reply=out?.choices?.[0]?.message?.content;
+  if(typeof reply!=="string"||!reply.trim())return json({error:"Provider returned empty response"},502);
+  const {error:saveError}=await admin.from("messages").insert({conversation_id:cid,user_id:user.id,role:"assistant",content:reply.slice(0,20000),prompt_tokens:out.usage?.prompt_tokens??null,completion_tokens:out.usage?.completion_tokens??null});
+  if(saveError)return json({error:"คำตอบได้รับแล้วแต่บันทึกประวัติไม่สำเร็จ"},500);
+  const {data:conversation}=await admin.from("conversations").select("title").eq("id",cid).eq("user_id",user.id).single();
+  await admin.from("conversations").update({updated_at:new Date().toISOString(),provider:"orcarouter",model:MODEL}).eq("id",cid).eq("user_id",user.id);
+  return json({conversation_id:cid,title:conversation?.title??prompt.slice(0,72),reply,usage:out.usage??null,model:MODEL});
+ }catch{return json({error:"OrcaRouter timeout or connection failure"},502)}
+});

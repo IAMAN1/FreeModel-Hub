@@ -1,7 +1,7 @@
 create table if not exists public.profiles(id uuid primary key references auth.users(id) on delete cascade,guardian_consent boolean not null default false,access_approved boolean not null default false,created_at timestamptz not null default now());
 create schema if not exists private;
 revoke all on schema private from public,anon,authenticated;
-create or replace function private.create_playground_profile() returns trigger language plpgsql security definer set search_path='' as $ begin insert into public.profiles(id,guardian_consent,access_approved) values(new.id,false,false) on conflict(id) do nothing; return new; end; $;
+create or replace function private.create_playground_profile() returns trigger language plpgsql security definer set search_path='' as $profile$ begin insert into public.profiles(id,guardian_consent,access_approved) values(new.id,false,false) on conflict(id) do nothing; return new; end; $profile$;
 revoke all on function private.create_playground_profile() from public,anon,authenticated;
 drop trigger if exists on_auth_user_created_playground on auth.users;
 create trigger on_auth_user_created_playground after insert on auth.users for each row execute function private.create_playground_profile();
